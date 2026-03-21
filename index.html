@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>מחשבת העדר 🐄</title>
+  <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #6c5ce7;
+      --secondary: #00b894;
+      --bg: #1a1a2e;
+      --card-bg: #fff;
+      --text: #333;
+    }
+
+    body {
+      font-family: 'Assistant', sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .screen { display: none; width: 100%; max-width: 500px; text-align: center; }
+    .screen.active { display: block; animation: fadeIn 0.4s; }
+
+    .card { background: var(--card-bg); border-radius: 20px; padding: 30px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); margin-bottom: 20px; }
+    h1 { color: #fff; font-weight: 800; font-size: 2.5rem; text-align: center; margin-bottom: 20px;}
+    h2 { color: var(--primary); margin-top: 0; }
+    
+    input { width: 100%; padding: 15px; margin: 10px 0; border: 2px solid #ddd; border-radius: 10px; font-size: 1.1rem; box-sizing: border-box; }
+    button { background-color: var(--secondary); color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 1.2rem; font-weight: 700; cursor: pointer; width: 100%; transition: all 0.2s; margin-top: 10px; }
+    button:hover { transform: translateY(-3px); }
+    button.danger { background-color: #d63031; }
+    
+    .admin-link { color: #a4b0be; font-size: 0.9rem; cursor: pointer; margin-top: 20px; display: inline-block; text-decoration: underline;}
+    
+    /* Madness Meter */
+    .madness-bar { background: #eee; border-radius: 10px; margin-bottom: 10px; position: relative; overflow: hidden; height: 40px; display: flex; align-items: center; padding: 0 15px; }
+    .madness-fill { position: absolute; top: 0; right: 0; bottom: 0; background: var(--secondary); z-index: 1; transition: width 1s; }
+    .madness-text { position: relative; z-index: 2; width: 100%; display: flex; justify-content: space-between; font-weight: bold; }
+    
+    /* Leaderboard */
+    .leaderboard { width: 100%; border-collapse: collapse; }
+    .leaderboard th, .leaderboard td { text-align: right; padding: 10px; border-bottom: 1px solid #eee; }
+    
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+
+  <h1>מחשבת העדר 🐄</h1>
+
+  <div id="login-screen" class="screen active">
+    <div class="card">
+      <h2>מי אתה?</h2>
+      <input type="text" id="player-name" placeholder="הקלד את השם שלך...">
+      <button id="btn-login">היכנס למשחק</button>
+    </div>
+    <span class="admin-link" id="link-admin">כניסת מורה (מנהל משחק)</span>
+  </div>
+
+  <div id="admin-screen" class="screen">
+    <div class="card" style="border: 3px solid #d63031;">
+      <h2>👑 פאנל ניהול מורה</h2>
+      <input type="text" id="admin-category" placeholder="הקלד קטגוריה חדשה (למשל: סרטים)...">
+      <button id="btn-admin-start">שלח שאלה לתלמידים</button>
+      <hr>
+      <button id="btn-admin-close" style="background:#0984e3;">סגור סיבוב וחשוף תוצאות!</button>
+      <hr>
+      <button id="btn-admin-reset" class="danger">איפוס מלא של המשחק</button>
+    </div>
+  </div>
+
+  <div id="waiting-screen" class="screen">
+    <div class="card">
+      <h2>ממתינים... ⏳</h2>
+      <p>המורה יפעיל את השאלה בקרוב.</p>
+    </div>
+  </div>
+
+  <div id="answering-screen" class="screen">
+    <div class="card" style="background: var(--primary); color: white;">
+      <h2 style="color: white; margin:0;" id="display-category">קטגוריה תופיע כאן</h2>
+    </div>
+    <div class="card">
+      <h2>מה התשובה שלך?</h2>
+      <input type="text" id="player-answer" placeholder="מילה אחת בלבד...">
+      <button id="btn-submit-answer">שלח!</button>
+      <p id="answer-status"></p>
+    </div>
+  </div>
+
+  <div id="results-screen" class="screen">
+    <div class="card">
+      <h2>🔥 מד הטירוף (סיבוב נוכחי)</h2>
+      <div id="madness-container"></div>
+    </div>
+    <div class="card">
+      <h2>🏆 לוח מובילים כללי</h2>
+      <table class="leaderboard">
+        <thead><tr><th>שם</th><th>נקודות</th></tr></thead>
+        <tbody id="leaderboard-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+    import { getDatabase, ref, set, get, onValue, update, remove } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+
+    // הגדרות הפיירבייס שלך
+    const firebaseConfig = {
+      apiKey: "AIzaSyAFw1v_X9xCR7Qsx0lLcw6aIdWa6vN8Uog",
+      authDomain: "herd-mentality-c0c0a.firebaseapp.com",
+      databaseURL: "https://herd-mentality-c0c0a-default-rtdb.firebaseio.com",
+      projectId: "herd-mentality-c0c0a",
+      storageBucket: "herd-mentality-c0c0a.firebasestorage.app",
+      messagingSenderId: "697436671170",
+      appId: "1:697436671170:web:1765156f5c51ca373c3f5b"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    let myName = "";
+    let currentRound = 0;
+
+    // פונקציית מעבר מסכים
+    function showScreen(screenId) {
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById(screenId).classList.add('active');
+    }
+
+    // --- לוגיקת משתמש (תלמיד) ---
+    document.getElementById('btn-login').addEventListener('click', () => {
+      myName = document.getElementById('player-name').value.trim();
+      if (!myName) return alert("הכנס שם בבקשה");
+      
+      // האזנה למצב המשחק בזמן אמת!
+      onValue(ref(db, 'gameState'), (snapshot) => {
+        const state = snapshot.val();
+        if (!state) return;
+        
+        currentRound = state.round;
+        
+        if (state.status === 'WAITING') {
+          showScreen('waiting-screen');
+        } else if (state.status === 'ANSWERING') {
+          document.getElementById('display-category').innerText = state.category;
+          document.getElementById('player-answer').value = '';
+          document.getElementById('player-answer').disabled = false;
+          document.getElementById('btn-submit-answer').disabled = false;
+          document.getElementById('answer-status').innerText = '';
+          showScreen('answering-screen');
+        } else if (state.status === 'RESULTS') {
+          renderResults(state.round);
+          showScreen('results-screen');
+        }
+      });
+    });
+
+    document.getElementById('btn-submit-answer').addEventListener('click', () => {
+      const ans = document.getElementById('player-answer').value.trim().toLowerCase();
+      if (!ans) return;
+      
+      document.getElementById('btn-submit-answer').disabled = true;
+      document.getElementById('player-answer').disabled = true;
+      document.getElementById('answer-status').innerText = "נשלח! ממתינים לכולם...";
+
+      set(ref(db, `answers/round_${currentRound}/${myName}`), ans);
+    });
+
+    // חישוב והצגת תוצאות
+    async function renderResults(roundNum) {
+      const answersSnap = await get(ref(db, `answers/round_${roundNum}`));
+      const playersSnap = await get(ref(db, 'players'));
+      
+      const answers = answersSnap.val() || {};
+      const players = playersSnap.val() || {};
+
+      // חישוב שכיחויות למד הטירוף
+      let counts = {};
+      Object.values(answers).forEach(ans => { counts[ans] = (counts[ans] || 0) + 1; });
+      
+      let madnessArr = Object.keys(counts).map(ans => ({ text: ans, count: counts[ans] }));
+      madnessArr.sort((a,b) => b.count - a.count);
+
+      const maxCount = madnessArr.length ? madnessArr[0].count : 1;
+      const container = document.getElementById('madness-container');
+      container.innerHTML = '';
+      
+      madnessArr.forEach(item => {
+        let pct = (item.count / maxCount) * 100;
+        container.innerHTML += `
+          <div class="madness-bar">
+            <div class="madness-fill" style="width: ${pct}%"></div>
+            <div class="madness-text"><span>${item.text}</span><span>${item.count} קולות</span></div>
+          </div>`;
+      });
+
+      // לוח מובילים
+      let leaderArr = Object.keys(players).map(p => ({ name: p, score: players[p].score || 0 }));
+      leaderArr.sort((a,b) => b.score - a.score);
+      
+      const tbody = document.getElementById('leaderboard-body');
+      tbody.innerHTML = '';
+      leaderArr.forEach(p => {
+        tbody.innerHTML += `<tr><td>${p.name}</td><td>${p.score}</td></tr>`;
+      });
+    }
+
+    // --- לוגיקת מורה (ניהול) ---
+    document.getElementById('link-admin').addEventListener('click', () => {
+      let pass = prompt("סיסמת מורה:");
+      if (pass === "1234") showScreen('admin-screen'); // סיסמה פשוטה כדי שתלמידים לא ייכנסו
+    });
+
+    document.getElementById('btn-admin-start').addEventListener('click', async () => {
+      const cat = document.getElementById('admin-category').value;
+      if (!cat) return alert("הכנס קטגוריה");
+      
+      const snap = await get(ref(db, 'gameState/round'));
+      const newRound = (snap.val() || 0) + 1;
+
+      set(ref(db, 'gameState'), { status: 'ANSWERING', category: cat, round: newRound });
+      alert("נשלח לתלמידים!");
+    });
+
+    document.getElementById('btn-admin-close').addEventListener('click', async () => {
+      const stateSnap = await get(ref(db, 'gameState'));
+      const state = stateSnap.val();
+      if(!state) return;
+
+      const answersSnap = await get(ref(db, `answers/round_${state.round}`));
+      const answers = answersSnap.val() || {};
+
+      // חישוב נקודות
+      let counts = {};
+      Object.values(answers).forEach(ans => counts[ans] = (counts[ans] || 0) + 1);
+
+      const playersSnap = await get(ref(db, 'players'));
+      let players = playersSnap.val() || {};
+
+      for (let [playerName, answer] of Object.entries(answers)) {
+        let ptsGained = counts[answer];
+        let currentScore = players[playerName]?.score || 0;
+        set(ref(db, `players/${playerName}/score`), currentScore + ptsGained);
+      }
+
+      update(ref(db, 'gameState'), { status: 'RESULTS' });
+      alert("התוצאות פורסמו למסכים!");
+    });
+
+    document.getElementById('btn-admin-reset').addEventListener('click', () => {
+      if(confirm("בטוח? זה ימחק את כל הניקוד!")) {
+        set(ref(db, 'gameState'), { status: 'WAITING', category: '', round: 0 });
+        remove(ref(db, 'answers'));
+        remove(ref(db, 'players'));
+        alert("המשחק אופס.");
+      }
+    });
+
+    // אתחול מצב המתנה אם לא קיים
+    get(ref(db, 'gameState')).then(snap => {
+      if(!snap.exists()) set(ref(db, 'gameState'), { status: 'WAITING', category: '', round: 0 });
+    });
+
+  </script>
+</body>
+</html>
